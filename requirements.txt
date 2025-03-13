@@ -1,2 +1,6 @@
+pypdf
+langchain
+langchain-google-genai
+google-generativeai
+chromadb
 streamlit
-openai

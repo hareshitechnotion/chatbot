@@ -1,56 +1,85 @@
 import streamlit as st
-from openai import OpenAI
+from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain.chains import ConversationalRetrievalChain
+from langchain.memory import ConversationBufferMemory
+from langchain.vectorstores import Chroma
+from langchain_google_genai import GoogleGenerativeAIEmbeddings
+import google.generativeai as genai
+from dotenv import load_dotenv
+import os
 
-# Show title and description.
-st.title("💬 Chatbot")
-st.write(
-    "This is a simple chatbot that uses OpenAI's GPT-3.5 model to generate responses. "
-    "To use this app, you need to provide an OpenAI API key, which you can get [here](https://platform.openai.com/account/api-keys). "
-    "You can also learn how to build this app step by step by [following our tutorial](https://docs.streamlit.io/develop/tutorials/llms/build-conversational-apps)."
-)
+load_dotenv()
 
-# Ask user for their OpenAI API key via `st.text_input`.
-# Alternatively, you can store the API key in `./.streamlit/secrets.toml` and access it
-# via `st.secrets`, see https://docs.streamlit.io/develop/concepts/connections/secrets-management
-openai_api_key = st.text_input("OpenAI API Key", type="password")
-if not openai_api_key:
-    st.info("Please add your OpenAI API key to continue.", icon="🗝️")
-else:
+GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY')
+genai.configure(api_key=GOOGLE_API_KEY)
 
-    # Create an OpenAI client.
-    client = OpenAI(api_key=openai_api_key)
+def load_vector_db():
+    # Load the existing database
+    embeddings = GoogleGenerativeAIEmbeddings(
+        model="models/embedding-001",  # This is correct based on your model list
+        google_api_key=GOOGLE_API_KEY
+    )
+    vectorstore = Chroma(
+        persist_directory="./data/chroma_db",
+        embedding_function=embeddings
+    )
+    return vectorstore
 
-    # Create a session state variable to store the chat messages. This ensures that the
-    # messages persist across reruns.
+def setup_conversation_chain(vectorstore):
+    # Initialize the Gemini LLM with one of your available models
+    llm = ChatGoogleGenerativeAI(
+        model="models/gemini-1.5-pro",  # Using Gemini 1.5 Pro from your model list
+        google_api_key=GOOGLE_API_KEY,
+        temperature=0.2
+    )
+    
+    # Set up memory for conversation history
+    memory = ConversationBufferMemory(
+        memory_key="chat_history",
+        return_messages=True
+    )
+    
+    # Create the conversation chain
+    chain = ConversationalRetrievalChain.from_llm(
+        llm=llm,
+        retriever=vectorstore.as_retriever(search_kwargs={"k": 5}),
+        memory=memory
+    )
+    return chain
+
+# Main application
+def main():
+    st.title("Hr Bot")
+    
+    # Load the vector database
+    vectorstore = load_vector_db()
+    
+    # Setup the conversation chain
+    if "conversation_chain" not in st.session_state:
+        st.session_state.conversation_chain = setup_conversation_chain(vectorstore)
+    
+    # Initialize messages if not in session state
     if "messages" not in st.session_state:
         st.session_state.messages = []
-
-    # Display the existing chat messages via `st.chat_message`.
+    
+    # Display chat history
     for message in st.session_state.messages:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
-
-    # Create a chat input field to allow the user to enter a message. This will display
-    # automatically at the bottom of the page.
-    if prompt := st.chat_input("What is up?"):
-
-        # Store and display the current prompt.
+    
+    # Get user input
+    if prompt := st.chat_input("Ask something about your PDFs"):
         st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("user"):
             st.markdown(prompt)
-
-        # Generate a response using the OpenAI API.
-        stream = client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {"role": m["role"], "content": m["content"]}
-                for m in st.session_state.messages
-            ],
-            stream=True,
-        )
-
-        # Stream the response to the chat using `st.write_stream`, then store it in 
-        # session state.
+        
+        # Get response from the conversation chain
         with st.chat_message("assistant"):
-            response = st.write_stream(stream)
+            with st.spinner("Thinking..."):
+                response = st.session_state.conversation_chain.run(question=prompt)
+                st.markdown(response)
+        
         st.session_state.messages.append({"role": "assistant", "content": response})
+
+if __name__ == "__main__":
+    main()
