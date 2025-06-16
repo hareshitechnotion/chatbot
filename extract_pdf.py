@@ -26,3 +26,6 @@ if __name__ == "__main__":
     
     print(f"Extraction complete! Saved to extracted_text.txt")
     print(f"Total characters extracted: {len(all_text)}")
+
+
+    
